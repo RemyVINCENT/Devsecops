@@ -1,33 +1,40 @@
-name: CI
+name: Application Pipeline
 
-on:
-  push:
-    branches:
-      - main
-      - develop
-  pull_request:
+on: [push]
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout du code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Mise en cache des modules npm
+        uses: actions/cache@v4
         with:
-          node-version: '20'
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('package-lock.json') }}
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Installation des dépendances
+        run: |
+          echo "::group::Installation des modules Node.js"
+          npm ci
+          echo "::endgroup::"
 
-      - name: Run unit tests
-        run: npm run test -- --testPathPattern=unit
+      - name: Exécution des tests
+        run: npm test
 
-      - name: Run integration tests
-        run: npm run test -- --testPathPattern=integration
+      - name: Publication du rapport JUnit
+        uses: mikepenz/action-junit-report@v4
+        if: always()
+        with:
+          report_paths: junit.xml
 
-      - name: Run e2e tests
-        run: npm run test -- --testPathPattern=e2e
+      - name: Vérification des secrets et variables
+        env:
+          APP_ENV: ${{ vars.APP_ENVIRONMENT }}
+          AWS_KEY: ${{ secrets.AWS_SECRET_KEY }}
+        run: |
+          echo "Environnement : $APP_ENV"
+          echo "Clé AWS : $AWS_KEY"
