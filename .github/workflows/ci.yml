@@ -1,40 +1,114 @@
 name: Application Pipeline
 
-on: [push]
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+    inputs:
+      target_sub_env:
+        description: 'Environnement cible (ex: sandbox)'
+        required: true
+        default: 'sandbox'
+  schedule:
+    - cron: '0 0 * * *'
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: write
+  security-events: write
+  actions: read
 
 jobs:
-  build:
+  build-and-test:
+    name: Build & Test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout du code
         uses: actions/checkout@v4
 
-      - name: Mise en cache des modules npm
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache des dépendances npm
         uses: actions/cache@v4
         with:
           path: ~/.npm
-          key: ${{ runner.os }}-npm-${{ hashFiles('package-lock.json') }}
+          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
 
       - name: Installation des dépendances
-        run: |
-          echo "::group::Installation des modules Node.js"
-          npm ci
-          echo "::endgroup::"
+        run: npm ci
 
       - name: Exécution des tests
-        run: npm test
+        run: |
+          echo "::group::Exécution des tests"
+          npm test
+          echo "::endgroup::"
+
+        env:
+          JEST_JUNIT_OUTPUT_DIR: ./reports
+          JEST_JUNIT_OUTPUT_NAME: junit.xml
 
       - name: Publication du rapport JUnit
-        uses: mikepenz/action-junit-report@v4
+        uses: dorny/test-reporter@v1
         if: always()
         with:
-          report_paths: junit.xml
+          name: Rapport Tests Jest
+          path: reports/junit.xml
+          reporter: jest-junit
 
       - name: Vérification des secrets et variables
         env:
           APP_ENV: ${{ vars.APP_ENVIRONMENT }}
           AWS_KEY: ${{ secrets.AWS_SECRET_KEY }}
         run: |
-          echo "Environnement : $APP_ENV"
-          echo "Clé AWS : $AWS_KEY"
+          echo "::group::Vérification des variables d'environnement"
+          echo "APP_ENVIRONMENT = $APP_ENV"
+          echo "AWS_SECRET_KEY = $AWS_KEY"
+          echo "::endgroup::"
+
+  deploy-staging-prod:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    environment: production
+
+    steps:
+      - name: Simulation du déploiement
+        run: |
+          echo "::group::Déploiement en production"
+          echo "Déploiement simulé vers l'environnement production..."
+          echo "Target sub env: ${{ github.event.inputs.target_sub_env }}"
+          echo "Déploiement terminé avec succès !"
+          echo "::endgroup::"
+
+  codeql-analysis:
+    name: Analyse CodeQL (SAST)
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Initialisation de CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+
+      - name: Build automatique
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Analyse CodeQL
+        uses: github/codeql-action/analyze@v3
